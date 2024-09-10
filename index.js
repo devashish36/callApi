@@ -5,6 +5,8 @@ const socketIo = require("socket.io");
 const io = socketIo(server, {
 	cors: {
 		origin: "*",
+		  methods: ["GET", "POST"],
+    credentials: true,
 	},
 }).of("/socket_connection");
 
