@@ -1,43 +1,88 @@
 const express = require("express");
-const app = express();
-const server = require("http").createServer(app);
+const http = require("http");
 const socketIo = require("socket.io");
+
+const app = express();
+const server = http.createServer(app);
 const io = socketIo(server, {
-	cors: {
-		origin: "*",
-		  methods: ["GET", "POST"],
-    credentials: true,
-	},
+  cors: {
+    origin: "*",
+  },
 }).of("/socket_connection");
 
 const PORT = 4321;
+const userSockets = new Map(); // Store user ID to socket mapping
 
 io.on("connection", (socket) => {
-	console.log("User connected:", socket.id);
+  console.log("User connected:", socket.id);
 
-	socket.on("message", (message) => {
-		console.log(message);
-		socket.broadcast.emit(`message`, message);
-	});
+  // Register user with a specific ID
+  socket.on("register-user", (userId) => {
+    userSockets.set(userId, socket.id);
+    console.log(`User ${userId} registered with socket ID ${socket.id}`);
+  });
 
-	socket.emit("me", socket.id);
-	socket.on("disconnect", () => {
-		socket.broadcast.emit("callEnded");
-	});
-	socket.on("callUser", ({ userToCall, signalData, from, name }) => {
-		console.log("name=> ", name);
-		io.to(userToCall).emit("callUser", { signal: signalData, from, name });
-	});
-	socket.on("answerCall", (data) => {
-		console.log("data=> ", data);
-		io.to(data.to).emit("callAccepted", data.signal);
-	});
+  // Handle call requests
+  socket.on("callUser", ({ userToCall, signalData, from, name }) => {
+    const targetSocketId = userSockets.get(userToCall);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit("incoming-call", { signal: signalData, from, name });
+    } else {
+      console.error(`Target user ${userToCall} not found`);
+    }
+  });
+
+  // Handle call answer
+  socket.on("answerCall", ({ to, signal }) => {
+    const targetSocketId = userSockets.get(to);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit("callAccepted", signal);
+    } else {
+      console.error(`Target user ${to} not found`);
+    }
+  });
+
+  // Handle ICE candidate
+  socket.on("message", (message) => {
+    console.log("Received message on server:", message);
+    const targetSocketId = userSockets.get(message.target);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit("message", message);
+    } else {
+      console.error(`Target user ${message.target} not found`);
+    }
+  });
+
+  // Handle hangup
+  socket.on("hangup", ({ to }) => {
+    const targetSocketId = userSockets.get(to);
+    if (targetSocketId) {
+      io.to(targetSocketId).emit("hangup");
+    }
+  });
+
+  // Handle disconnection
+  socket.on("disconnect", () => {
+    userSockets.forEach((socketId, userId) => {
+      if (socketId === socket.id) {
+        userSockets.delete(userId);
+        console.log(`User ${userId} disconnected`);
+      }
+    });
+  });
 });
 
 app.get("/api", (req, res) => {
-	res.send({ msg: "Backend Server is Running!" });
+  res.send({ msg: "Backend Server is Running!" });
 });
 
-server.listen(PORT, function () {
-	console.log(`Server running on port ${PORT}`);
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
+
+
+
+
+
+
+
